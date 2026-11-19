@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>JohnBF</title>
+  <meta name="description" content="Protein, workout and vitamin tracker with iPhone Calendar reminders.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0c0f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="JohnBF">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#today" aria-label="JohnBF home">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <rect x="8" y="5" width="6" height="22" rx="3" transform="skewX(-14)" fill="var(--protein)"/>
+        <rect x="17" y="5" width="6" height="22" rx="3" transform="skewX(-14)" fill="var(--move)"/>
+        <rect x="26" y="5" width="6" height="22" rx="3" transform="skewX(-14)" fill="var(--vit)"/>
+      </svg>
+      <span>JohnBF</span>
+    </a>
+    <button class="icon-btn" data-act="open-settings" aria-label="Settings and backup">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
+    </button>
+  </header>
+
+  <main id="view" tabindex="-1"></main>
+
+  <nav class="tabbar" aria-label="Sections">
+    <a href="#today" data-tab="today">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg>
+      <span>Today</span>
+    </a>
+    <a href="#protein" data-tab="protein" class="t-protein">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c3.6 0 6.5 5.6 6.5 10.1a6.5 6.5 0 0 1-13 0C5.5 8.6 8.4 3 12 3z"/></svg>
+      <span>Protein</span>
+    </a>
+    <a href="#move" data-tab="move" class="t-move">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5v11M17.5 6.5v11M3 9.5v5M21 9.5v5M6.5 12h11"/></svg>
+      <span>Move</span>
+    </a>
+    <a href="#vitamins" data-tab="vitamins" class="t-vit">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="8.5" width="18" height="7" rx="3.5" transform="rotate(-45 12 12)"/><path d="m9.5 9.5 5 5"/></svg>
+      <span>Vitamins</span>
+    </a>
+    <a href="#remind" data-tab="remind">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4l2-2zM10 20.5a2 2 0 0 0 4 0"/></svg>
+      <span>Remind</span>
+    </a>
+  </nav>
+
+  <dialog id="sheet" aria-labelledby="sheet-title"></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <input type="file" id="import-file" accept="application/json,.json" hidden>
+
+  <script src="ics.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
