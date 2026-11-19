@@ -4,36 +4,36 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>JohnBF</title>
+  <title>VITA</title>
   <style>
     body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; box-sizing: border-box;
-      background: #0b0c0f; color: #f5f6f8; text-align: center;
+      background: #0a0709; color: #fff4f8; text-align: center;
       font: 600 17px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-    a { color: #ff7a3d; font-weight: 800; }
+    a { color: #ff8fc0; font-weight: 800; }
   </style>
 </head>
 <body>
   <main>
     <p id="msg">Page not found.</p>
-    <p><a href="./">Open JohnBF</a></p>
+    <p><a href="./">Open VITA</a></p>
   </main>
   <script>
     /*
-     * GitHub Pages serves this page for any missing path. johnbf.ics is built on the
+     * GitHub Pages serves this page for any missing path. vita.ics is built on the
      * phone by the service worker, so if the worker isn't installed yet in this browser
      * (e.g. a link pasted into Safari), install it and reload: the worker answers next time.
      */
     (function () {
       var path = location.pathname;
-      if (!/\/johnbf\.ics$/.test(path) || !('serviceWorker' in navigator)) return;
+      if (!/\/vita\.ics$/.test(path) || !('serviceWorker' in navigator)) return;
       var msg = document.getElementById('msg');
-      var key = 'johnbf-ics-retry';
+      var key = 'vita-ics-retry';
       if (sessionStorage.getItem(key) === location.href) {
-        msg.textContent = 'Could not build the calendar file here. Open JohnBF in Safari and try again.';
+        msg.textContent = 'Could not build the calendar file here. Open VITA in Safari and try again.';
         return;
       }
-      msg.textContent = 'Preparing your JohnBF calendar…';
-      var base = path.replace(/johnbf\.ics$/, '');
+      msg.textContent = 'Preparing your VITA calendar…';
+      var base = path.replace(/vita\.ics$/, '');
       navigator.serviceWorker
         .register(base + 'sw.js', { scope: base })
         .then(function () { return navigator.serviceWorker.ready; })

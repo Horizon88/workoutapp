@@ -1,13 +1,13 @@
 /*
- * JohnBF service worker
+ * VITA service worker
  * 1. Offline app shell (the app works with no signal at the gym).
- * 2. Serves ./johnbf.ics?d=<payload> as a real text/calendar response, built on the
+ * 2. Serves ./vita.ics?d=<payload> as a real text/calendar response, built on the
  *    device from the schedule in the URL. A real .ics URL is what iPhone Safari
  *    hands to Calendar most reliably; blob: links are flaky there.
  */
 importScripts('./ics.js');
 
-const VERSION = 'johnbf-v1.0.0';
+const VERSION = 'vita-v2.0.0';
 const SHELL = [
   './',
   './index.html',
@@ -19,6 +19,7 @@ const SHELL = [
   './icons/icon-180.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
+  './icons/icon-maskable-512.png',
 ];
 
 self.addEventListener('install', (event) => {
@@ -43,7 +44,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
 
-  if (url.pathname.endsWith('/johnbf.ics')) {
+  if (url.pathname.endsWith('/vita.ics')) {
     event.respondWith(calendarResponse(url));
     return;
   }
@@ -82,9 +83,9 @@ self.addEventListener('fetch', (event) => {
 
 function calendarResponse(url) {
   try {
-    const payload = self.JohnBFICS.decode(url.searchParams.get('d'));
-    const body = self.JohnBFICS.build(payload, new Date());
-    const name = payload && payload.test ? 'johnbf-test.ics' : 'johnbf-reminders.ics';
+    const payload = self.VitaICS.decode(url.searchParams.get('d'));
+    const body = self.VitaICS.build(payload, new Date());
+    const name = payload && payload.test ? 'vita-test.ics' : 'vita-reminders.ics';
     return new Response(body, {
       headers: {
         'Content-Type': 'text/calendar; charset=utf-8',
@@ -93,7 +94,7 @@ function calendarResponse(url) {
       },
     });
   } catch (err) {
-    return new Response('JohnBF could not build this calendar file: ' + err.message, {
+    return new Response('VITA could not build this calendar file: ' + err.message, {
       status: 400,
       headers: { 'Content-Type': 'text/plain; charset=utf-8' },
     });

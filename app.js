@@ -1,8 +1,10 @@
-/* JohnBF: protein, workout and vitamin tracker. All data stays in this browser (localStorage). */
+/* VITA: Vita's protein, movement and vitamin tracker.
+ * Data stays on this phone: settings and logs in localStorage, photos in IndexedDB. */
 'use strict';
 (function () {
-  const ICS = window.JohnBFICS;
-  const STORE = 'johnbf:v1';
+  const ICS = window.VitaICS;
+  const STORE = 'vita:v1';
+  const DEFAULT_NAME = 'Vita';
   const LB_TO_KG = 0.45359237;
   const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const DOW_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -16,8 +18,27 @@
   const KIND = {
     protein: { name: 'Protein', cls: 'protein' },
     vitamins: { name: 'Vitamins', cls: 'vit' },
-    workout: { name: 'Workout', cls: 'move' },
+    workout: { name: 'Movement', cls: 'move' },
   };
+
+  // Calm & kind lines for the Today screen. No health claims here.
+  const MANTRAS = [
+    'Small steps, every day.',
+    'Progress, not perfection.',
+    'You showed up. That counts.',
+    'Strong and soft can live together.',
+    'Fuel yourself like you matter. You do.',
+    'One good choice at a time.',
+    'Rest is part of the plan.',
+    'Be proud of how far you’ve come.',
+    'Gentle and consistent.',
+    'Your body is on your side.',
+  ];
+  const PHOTO_STYLES = [
+    { id: 'natural', label: 'Natural' },
+    { id: 'glow', label: 'Glow' },
+    { id: 'duo', label: 'Duotone' },
+  ];
 
   // ── Sources (each verified against PubMed / publisher / HHS before use) ──────────
   const REFS = {
@@ -80,23 +101,18 @@
       blurb: 'About 2.2 g/kg/day is the upper intake researchers suggest for people trying to maximize muscle gains.',
       refs: ['morton', 'schoenfeld'],
     },
-    older: {
-      label: 'Age 65+, active',
-      perKg: 1.2,
-      blurb: 'PROT-AGE advises at least 1.0–1.2 g/kg/day over 65, and 1.2 g/kg/day or more if you exercise.',
-      refs: ['bauer'],
-    },
     custom: { label: 'Custom', perKg: null, blurb: '', refs: [] },
   };
 
   const WORKOUT_TYPES = [
     { id: 'strength', label: 'Strength', effort: 'strength', strength: true },
-    { id: 'run', label: 'Run', effort: 'vigorous', strength: false },
     { id: 'walk', label: 'Walk', effort: 'moderate', strength: false },
+    { id: 'run', label: 'Run', effort: 'vigorous', strength: false },
+    { id: 'pilates', label: 'Pilates', effort: 'strength', strength: true },
+    { id: 'dance', label: 'Dance', effort: 'moderate', strength: false },
     { id: 'cycle', label: 'Cycle', effort: 'moderate', strength: false },
     { id: 'swim', label: 'Swim', effort: 'moderate', strength: false },
     { id: 'hiit', label: 'HIIT', effort: 'vigorous', strength: false },
-    { id: 'sport', label: 'Sport', effort: 'moderate', strength: false },
     { id: 'yoga', label: 'Yoga', effort: 'light', strength: false },
     { id: 'other', label: 'Other', effort: 'moderate', strength: false },
   ];
@@ -116,15 +132,24 @@
       .replace(/-/g, '')
       .slice(0, 12);
   const keyOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const fromKey = (k) => {
+    const [y, m, d] = k.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
   const todayKey = () => keyOf(new Date());
   const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
   const weekStart = (d) => addDays(d, -((d.getDay() + 6) % 7));
+  const daysBetween = (k1, k2) => Math.round((fromKey(k2) - fromKey(k1)) / 86400000);
+  const fmtShort = (k) => {
+    const d = fromKey(k);
+    return `${d.getDate()} ${MON[d.getMonth()]}`;
+  };
+  const fmtLong = (k) => {
+    const d = fromKey(k);
+    return `${DOW[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]} ${d.getFullYear()}`;
+  };
   const clock = (d) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   const clockOf = (ts) => clock(new Date(ts));
-  const hhmmToDate = (t) => {
-    const [H, M] = t.split(':').map(Number);
-    return new Date(2000, 0, 1, H, M);
-  };
   const round1 = (n) => Math.round(n * 10) / 10;
   const fmtG = (n) => String(Math.round(n));
   const cleanNum = (v) => {
@@ -146,7 +171,7 @@
       { id: uid(), kind: 'vitamins', label: 'With breakfast', time: '08:00', days: all, followUp: 30 },
       { id: uid(), kind: 'protein', label: 'Lunch', time: '12:30', days: all, followUp: 30 },
       { id: uid(), kind: 'protein', label: 'Snack', time: '16:00', days: all, followUp: 30 },
-      { id: uid(), kind: 'workout', label: 'Training', time: '17:30', days: [1, 3, 5], followUp: 60 },
+      { id: uid(), kind: 'workout', label: 'Movement', time: '17:30', days: [1, 3, 5], followUp: 60 },
       { id: uid(), kind: 'protein', label: 'Dinner', time: '19:30', days: all, followUp: 30 },
     ];
   }
@@ -154,7 +179,10 @@
   function defaults() {
     return {
       v: 1,
-      profile: { weight: '', unit: 'lb', goal: 'active', custom: '' },
+      profile: { name: DEFAULT_NAME, weight: '', unit: 'lb', goal: 'active', custom: '' },
+      cover: null, // { id, pos: 0-100, style }
+      progress: [], // [{ id, date }]
+      mantra: '',
       supplements: [{ id: uid(), name: 'Multivitamin', dose: '1 tablet', withFood: true }],
       foods: [],
       reminders: defaultReminders(),
@@ -169,8 +197,9 @@
     const d = defaults();
     const out = Object.assign(d, s);
     out.profile = Object.assign(defaults().profile, s.profile || {});
+    if (!GOALS[out.profile.goal]) out.profile.goal = 'active';
     out.ui = Object.assign({ installDismissed: false }, s.ui || {});
-    for (const k of ['supplements', 'foods', 'reminders']) if (!Array.isArray(out[k])) out[k] = d[k];
+    for (const k of ['supplements', 'foods', 'reminders', 'progress']) if (!Array.isArray(out[k])) out[k] = d[k];
     if (!out.days || typeof out.days !== 'object') out.days = {};
     return out;
   }
@@ -194,7 +223,7 @@
     try {
       localStorage.setItem(STORE, JSON.stringify(state));
     } catch (e) {
-      toast('Could not save on this device');
+      toast('Couldn’t save on this phone');
     }
   }
   function commit() {
@@ -202,9 +231,145 @@
     render();
   }
 
+  const displayName = () => String(state.profile.name || '').trim();
+  const nameComma = () => (displayName() ? `, ${displayName()}` : '');
+
   const EMPTY_DAY = () => ({ protein: [], workouts: [], supps: {}, suppGoal: 0 });
   const day = (k) => state.days[k] || EMPTY_DAY();
   const dayW = (k) => (state.days[k] = state.days[k] || EMPTY_DAY());
+
+  // ── Photos (IndexedDB; never leave the phone) ───────────────────────────────
+  const PhotoDB = (() => {
+    let dbp = null;
+    function open() {
+      if (!dbp)
+        dbp = new Promise((resolve, reject) => {
+          const req = indexedDB.open('vita-photos', 1);
+          req.onupgradeneeded = () => req.result.createObjectStore('photos', { keyPath: 'id' });
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+      return dbp;
+    }
+    async function run(mode, fn) {
+      const db = await open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('photos', mode);
+        const req = fn(tx.objectStore('photos'));
+        tx.oncomplete = () => resolve(req ? req.result : undefined);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      });
+    }
+    return {
+      put: (rec) => run('readwrite', (s) => s.put(rec)),
+      get: (id) => run('readonly', (s) => s.get(id)),
+      del: (id) => run('readwrite', (s) => s.delete(id)),
+      clear: () => run('readwrite', (s) => s.clear()),
+    };
+  })();
+
+  const photoUrls = new Map();
+  const photoLoading = new Set();
+  function photoURL(id) {
+    if (!id) return '';
+    if (photoUrls.has(id)) return photoUrls.get(id);
+    if (!photoLoading.has(id) && 'indexedDB' in window) {
+      photoLoading.add(id);
+      PhotoDB.get(id)
+        .then((rec) => {
+          if (rec && rec.buf) {
+            photoUrls.set(id, URL.createObjectURL(new Blob([rec.buf], { type: rec.type || 'image/jpeg' })));
+            softRender();
+          }
+        })
+        .catch(() => {})
+        .finally(() => photoLoading.delete(id));
+    }
+    return '';
+  }
+  function forgetPhoto(id) {
+    PhotoDB.del(id).catch(() => {});
+    const u = photoUrls.get(id);
+    if (u) URL.revokeObjectURL(u);
+    photoUrls.delete(id);
+  }
+
+  // Shrink to ≤1400px JPEG so photos stay light; iOS applies EXIF rotation when drawing.
+  async function processImage(file, maxSide = 1400) {
+    const src = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      img.src = src;
+      await img.decode();
+      const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+      const w = Math.round(img.naturalWidth * scale);
+      const ht = Math.round(img.naturalHeight * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = ht;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, ht);
+      const blob = await new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error('encode'))), 'image/jpeg', 0.86));
+      return { buf: await blob.arrayBuffer(), type: 'image/jpeg', w, h: ht };
+    } finally {
+      URL.revokeObjectURL(src);
+    }
+  }
+
+  let pickPurpose = null;
+  const picker = document.getElementById('pick-photo');
+  function pickPhoto(purpose) {
+    pickPurpose = purpose;
+    picker.value = '';
+    picker.click();
+  }
+  picker.addEventListener('change', async () => {
+    const file = picker.files && picker.files[0];
+    picker.value = '';
+    if (!file) return;
+    try {
+      const img = await processImage(file);
+      const id = uid();
+      await PhotoDB.put(Object.assign({ id, created: Date.now() }, img));
+      if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+      if (pickPurpose === 'cover') {
+        const prev = state.cover;
+        state.cover = { id, pos: prev ? prev.pos : 30, style: prev ? prev.style : 'glow' };
+        if (prev) forgetPhoto(prev.id);
+        commit();
+        toast('Cover photo set 💗');
+      } else {
+        state.progress.push({ id, date: todayKey() });
+        commit();
+        toast('Progress photo saved 💗');
+      }
+    } catch (err) {
+      toast('Couldn’t save that photo. Try another one?');
+    }
+  });
+
+  function photoImg(c, alt, extraClass) {
+    const url = c ? photoURL(c.id) : '';
+    if (!url) return '';
+    return `<img class="photo ${extraClass || ''}" src="${url}" alt="${h(alt)}" style="object-position:50% ${Number(c.pos) || 0}%"><span class="tint" aria-hidden="true"></span>`;
+  }
+
+  // ── Mantra of the day ────────────────────────────────────────────────────────
+  let mantraShift = 0;
+  function mantra() {
+    const custom = String(state.mantra || '').trim();
+    const list = custom ? [custom, ...MANTRAS] : MANTRAS;
+    const dayNum = Math.floor((Date.now() - new Date().getTimezoneOffset() * 60000) / 86400000);
+    const base = custom ? 0 : dayNum % list.length;
+    return list[(base + mantraShift) % list.length];
+  }
+  function greeting() {
+    const hr = new Date().getHours();
+    if (hr < 5) return 'Hi';
+    if (hr < 12) return 'Good morning';
+    if (hr < 17) return 'Good afternoon';
+    return 'Good evening';
+  }
 
   // ── Protein ──────────────────────────────────────────────────────────────────
   function weightKg() {
@@ -242,7 +407,7 @@
     return !!d && d.suppGoal > 0 && Object.keys(d.supps).length >= d.suppGoal;
   }
 
-  // ── Workouts ─────────────────────────────────────────────────────────────────
+  // ── Movement ─────────────────────────────────────────────────────────────────
   function weekStats(ws) {
     let mod = 0;
     let vig = 0;
@@ -308,6 +473,7 @@
     const t = proteinTarget();
     const n = state.reminders.filter((r) => r.kind === 'protein' && r.days.length).length;
     return {
+      n: displayName(),
       r: state.reminders.map((r) => ({ i: r.id, k: r.kind, l: r.label, t: r.time, d: r.days, f: r.followUp })),
       pt: t || null,
       pm: t && n ? Math.round(t / n) : null,
@@ -326,7 +492,7 @@
   }
   const calHash = () => hashStr(JSON.stringify(calPayload()));
   const appBase = () => new URL('./', location.href).href;
-  const icsHref = (payload) => appBase() + 'johnbf.ics?d=' + ICS.encode(payload);
+  const icsHref = (payload) => appBase() + 'vita.ics?d=' + ICS.encode(payload);
   // In the Home Screen app, open calendar links in Safari's sheet (it has a Done button).
   const calTarget = isStandalone ? ' target="_blank" rel="noopener"' : '';
 
@@ -337,8 +503,7 @@
 
   function downloadIcs(payload) {
     const text = ICS.build(payload, new Date());
-    const name = payload.test ? 'johnbf-test.ics' : 'johnbf-reminders.ics';
-    downloadBlob(new Blob([text], { type: 'text/calendar' }), name);
+    downloadBlob(new Blob([text], { type: 'text/calendar' }), payload.test ? 'vita-test.ics' : 'vita-reminders.ics');
   }
   function downloadBlob(blob, name) {
     const a = document.createElement('a');
@@ -416,8 +581,8 @@
     const s = Math.pow(10, Math.ceil(Math.log10(max / 4)));
     return { top: Math.ceil(max / s) * s, step: s };
   }
-  // Single-series column chart: title names the series, so no legend; goal as a reference line.
-  function columnChart({ data, goal, unit, cls, caption }) {
+  // Single-series column chart: the card title names the series, so no legend; goal as a reference line.
+  function columnChart({ data, goal, unit, cls, caption, firstCol }) {
     const max = Math.max(goal || 0, ...data.map((d) => d.value));
     const { top, step } = niceScale(max > 0 ? max * 1.08 : 100);
     const pct = (v) => ((v / top) * 100).toFixed(2);
@@ -444,7 +609,7 @@
       ${goal ? `<div class="chart-key"><i class="key-line" aria-hidden="true"></i>Goal: ${goal} ${h(unit)}</div>` : ''}
       <figcaption class="sr-only">${h(caption)}</figcaption>
       <details class="table-view"><summary>View as table</summary>
-        <table><thead><tr><th scope="col">${data[0] && data[0].full.includes('Week') ? 'Week' : 'Day'}</th><th scope="col">${h(unit)}</th></tr></thead>
+        <table><thead><tr><th scope="col">${h(firstCol)}</th><th scope="col">${h(unit)}</th></tr></thead>
         <tbody>${data.map((d) => `<tr><td>${h(d.full)}</td><td>${d.value}</td></tr>`).join('')}</tbody></table>
       </details>
     </figure>`;
@@ -453,9 +618,9 @@
   function installBanner() {
     if (!isIOS || isStandalone || state.ui.installDismissed) return '';
     return `<section class="card install">
-      <div><b>Install JohnBF</b>
+      <div><b>Install VITA</b>
         <p class="small">In Safari tap <b>Share</b> <span aria-hidden="true">⬆︎</span>, then <b>Add to Home Screen</b>. It opens full-screen like an app.</p></div>
-      <button class="icon-btn" data-act="dismiss-install" aria-label="Dismiss install tip">×</button>
+      <button type="button" class="icon-btn" data-act="dismiss-install" aria-label="Dismiss install tip">×</button>
     </section>`;
   }
 
@@ -501,13 +666,35 @@
           <span class="time">${label}</span>
           <span class="what">${h(typeLabel(w.type))}<small>${w.effort === 'strength' ? 'Muscle-strengthening' : `${h(effortLabel(w.effort))}${w.strength ? ' · 💪 strength' : ''}`}</small></span>
           <b>${w.min} min</b>
-          <button type="button" class="icon-btn small" data-act="del-workout" data-day="${k}" data-id="${w.id}" aria-label="Delete ${h(typeLabel(w.type))} workout">×</button>
+          <button type="button" class="icon-btn small" data-act="del-workout" data-day="${k}" data-id="${w.id}" aria-label="Delete ${h(typeLabel(w.type))} session">×</button>
         </li>`
       )
       .join('')}</ul>`;
   }
 
   // ── Views ────────────────────────────────────────────────────────────────────
+  function coverHero() {
+    const now = new Date();
+    const c = state.cover;
+    const name = displayName();
+    const img = photoImg(c, '');
+    return `<section class="cover style-${c ? h(c.style) : 'glow'}${img ? ' has-photo' : ''}">
+      ${img}
+      <span class="cover-shade" aria-hidden="true"></span>
+      ${c ? '' : '<button type="button" class="cover-add" data-act="pick-cover">＋ Add your photo</button>'}
+      <div class="cover-text">
+        <p class="eyebrow">${DOW_FULL[now.getDay()]} · ${now.getDate()} ${MON[now.getMonth()]}</p>
+        <h1 class="display greet">${greeting()}${name ? `,<br><span class="fire-text">${h(name)}</span>` : ''}</h1>
+        <button type="button" class="mantra" data-act="shuffle-mantra" aria-label="Show another line">${h(mantra())}<span aria-hidden="true"> ↻</span></button>
+        <div class="streaks">
+          ${streakChip('protein', proteinStreak(), 'day', 'protein')}
+          ${streakChip('move', weekStreak(), 'wk', 'active')}
+          ${streakChip('vit', vitStreak(), 'day', 'vitamins')}
+        </div>
+      </div>
+    </section>`;
+  }
+
   function renderToday() {
     const now = new Date();
     const k = todayKey();
@@ -521,15 +708,7 @@
 
     return `
     ${installBanner()}
-    <section class="hero">
-      <p class="eyebrow">${DOW_FULL[now.getDay()]}</p>
-      <h1 class="display">${now.getDate()} ${MON[now.getMonth()]}</h1>
-      <div class="streaks">
-        ${streakChip('protein', proteinStreak(), 'day', 'protein')}
-        ${streakChip('move', weekStreak(), 'wk', 'active')}
-        ${streakChip('vit', vitStreak(), 'day', 'vitamins')}
-      </div>
-    </section>
+    ${coverHero()}
 
     <section class="rings">
       ${ringCard({ href: '#protein', cls: 'protein', pct: t ? g / t : 0, big: fmtG(g), small: t ? `of ${t} g` : 'grams', label: 'Protein', aria: t ? `Protein: ${fmtG(g)} of ${t} grams` : `Protein: ${fmtG(g)} grams` })}
@@ -537,21 +716,21 @@
       ${ringCard({ href: '#vitamins', cls: 'vit', pct: n ? taken / n : 0, big: taken, small: `of ${n}`, label: 'Vitamins', aria: `Vitamins: ${taken} of ${n} taken` })}
     </section>
 
-    ${!t ? `<a class="card callout protein" href="#protein"><b>Set your protein target →</b><span>Enter your weight and goal to get a daily number.</span></a>` : ''}
-    ${!state.calHash ? `<a class="card callout move" href="#remind"><b>Turn on reminders →</b><span>Add your schedule to iPhone Calendar so alerts pop up even when JohnBF is closed.</span></a>` : ''}
+    ${!t ? `<a class="card callout protein" href="#protein"><b>Set your protein goal →</b><span>Add your weight and goal and VITA works out a daily number for you.</span></a>` : ''}
+    ${!state.calHash ? `<a class="card callout move" href="#remind"><b>Turn on gentle reminders →</b><span>Add your schedule to iPhone Calendar so nudges arrive even when VITA is closed.</span></a>` : ''}
 
     ${
       next
         ? `<section class="card next">
             <i class="bar-accent ${KIND[next.r.kind].cls}"></i>
             <div><p class="eyebrow">Next up · ${dayWord(next.at)} ${clock(next.at)}</p>
-            <p class="next-title">${KIND[next.r.kind].name}${next.r.label ? ` · ${h(next.r.label)}` : ''}</p></div>
+            <p class="next-title">${KIND[next.r.kind].name}${next.r.label && next.r.label !== KIND[next.r.kind].name ? ` · ${h(next.r.label)}` : ''}</p></div>
           </section>`
         : ''
     }
 
     <section class="card">
-      <div class="card-head"><h2><i class="dot protein"></i>Protein</h2><span class="muted">${t ? (g >= t ? 'Goal hit 🔥' : `${fmtG(t - g)} g to go`) : ''}</span></div>
+      <div class="card-head"><h2><i class="dot protein"></i>Protein</h2><span class="muted">${t ? (g >= t ? 'Goal reached 💗' : `${fmtG(t - g)} g to go`) : ''}</span></div>
       ${quickProtein()}
     </section>
 
@@ -561,9 +740,9 @@
     </section>
 
     <section class="card">
-      <div class="card-head"><h2><i class="dot move"></i>Workout</h2><span class="muted">${ws.strength}/${STRENGTH_GOAL} strength days</span></div>
-      ${todays.length ? workoutRows(todays) : '<p class="muted">Nothing logged today.</p>'}
-      <button type="button" class="cta move" data-act="open-workout">+ Log workout</button>
+      <div class="card-head"><h2><i class="dot move"></i>Movement</h2><span class="muted">${ws.strength}/${STRENGTH_GOAL} strength days</span></div>
+      ${todays.length ? workoutRows(todays) : '<p class="muted">Nothing logged today, and that’s okay.</p>'}
+      <button type="button" class="cta" data-act="open-workout">+ Log movement</button>
     </section>`;
   }
 
@@ -580,14 +759,14 @@
     const t = proteinTarget();
     const goal = GOALS[p.goal] || GOALS.active;
     const proteinRems = state.reminders.filter((r) => r.kind === 'protein' && r.days.length).length;
-    let calc = 'Enter your weight to calculate.';
-    if (p.goal === 'custom') calc = t ? `Target: <b>${t} g/day</b>` : 'Enter your daily grams.';
+    let calc = 'Add your weight to work it out.';
+    if (p.goal === 'custom') calc = t ? `Goal: <b>${t} g/day</b>` : 'Add your daily grams.';
     else if (t) calc = `${h(p.weight)} ${p.unit}${p.unit === 'lb' ? ` = ${kg.toFixed(1)} kg` : ''} × ${goal.perKg} g/kg ≈ <b>${t} g/day</b>`;
     return `<section class="card" id="target">
-      <div class="card-head"><h2>Your daily target</h2></div>
+      <div class="card-head"><h2>Your daily goal</h2></div>
       <div class="field"><span class="field-label">Body weight</span>
         <div class="input-group">
-          <input data-field="weight" inputmode="decimal" value="${h(p.weight)}" placeholder="${p.unit === 'lb' ? 'e.g. 180' : 'e.g. 82'}" aria-label="Body weight in ${p.unit}" autocomplete="off">
+          <input data-field="weight" inputmode="decimal" value="${h(p.weight)}" placeholder="${p.unit === 'lb' ? 'e.g. 140' : 'e.g. 63'}" aria-label="Body weight in ${p.unit}" autocomplete="off">
           <div class="seg compact" role="group" aria-label="Unit">${['lb', 'kg']
             .map((u) => `<button type="button" class="${p.unit === u ? 'on' : ''}" data-act="unit" data-unit="${u}" aria-pressed="${p.unit === u}">${u}</button>`)
             .join('')}</div>
@@ -601,9 +780,9 @@
           )
           .join('')}</div>
       </div>
-      ${p.goal === 'custom' ? `<label class="field"><span class="field-label">Daily grams</span><input data-field="custom" inputmode="numeric" value="${h(p.custom)}" placeholder="e.g. 150" autocomplete="off"></label>` : ''}
+      ${p.goal === 'custom' ? `<label class="field"><span class="field-label">Daily grams</span><input data-field="custom" inputmode="numeric" value="${h(p.custom)}" placeholder="e.g. 110" autocomplete="off"></label>` : ''}
       <p class="calc">${calc}</p>
-      ${t && proteinRems ? `<p class="muted small">Split across your ${proteinRems} protein reminders ≈ <b>${Math.round(t / proteinRems)} g</b> each.${kg ? ` Schoenfeld &amp; Aragon suggest ~0.4 g/kg per meal over 4+ meals (≈${Math.round(kg * 0.4)} g for you).${cite('schoenfeld')}` : ''}</p>` : ''}
+      ${t && proteinRems ? `<p class="muted small">Spread across your ${proteinRems} protein reminders ≈ <b>${Math.round(t / proteinRems)} g</b> each.${kg ? ` Schoenfeld &amp; Aragon suggest ~0.4 g/kg per meal over 4+ meals (≈${Math.round(kg * 0.4)} g for you).${cite('schoenfeld')}` : ''}</p>` : ''}
       ${goal.perKg ? `<p class="muted small">${h(goal.blurb)}${cite(...goal.refs)}</p>` : ''}
     </section>`;
   }
@@ -613,10 +792,9 @@
     const data = [];
     for (let i = 6; i >= 0; i--) {
       const d = addDays(today, -i);
-      const k = keyOf(d);
-      data.push({ label: i === 0 ? 'Today' : DOW[d.getDay()], full: `${DOW[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]}`, value: Math.round(proteinOn(k)), current: i === 0 });
+      data.push({ label: i === 0 ? 'Today' : DOW[d.getDay()], full: `${DOW[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]}`, value: Math.round(proteinOn(keyOf(d))), current: i === 0 });
     }
-    return columnChart({ data, goal: proteinTarget(), unit: 'g', cls: 'protein', caption: 'Protein grams per day, last 7 days' });
+    return columnChart({ data, goal: proteinTarget(), unit: 'g', cls: 'protein', caption: 'Protein grams per day, last 7 days', firstCol: 'Day' });
   }
 
   function renderProtein() {
@@ -630,7 +808,7 @@
       <p class="eyebrow">Protein today</p>
       <h1 class="display">${fmtG(g)}<span class="unit">${t ? ` / ${t} g` : ' g'}</span></h1>
       ${t ? meter('protein', g / t) : ''}
-      <p class="sub">${t ? (g >= t ? `Goal hit 🔥 ${streak}-day streak` : `${fmtG(t - g)} g to go${streak ? ` · ${streak}-day streak` : ''}`) : 'Set your target below to start a streak.'}</p>
+      <p class="sub">${t ? (g >= t ? `Goal reached 💗 ${streak}-day streak` : `${fmtG(t - g)} g to go${streak ? ` · ${streak}-day streak` : ''}`) : 'Set your goal below and VITA will keep count.'}</p>
     </section>
     ${!t ? targetCard() : ''}
     <section class="card"><div class="card-head"><h2>Add protein</h2></div>${quickProtein()}</section>
@@ -660,7 +838,7 @@
                   <button type="button" class="icon-btn small" data-act="del-food" data-id="${f.id}" aria-label="Remove ${h(f.name)}">×</button></li>`
               )
               .join('')}</ul>`
-          : '<p class="muted small">Save foods you eat often (check the label for grams). They become one-tap buttons.</p>'
+          : '<p class="muted small">Save foods you eat often (the label tells you the grams). They become one-tap buttons.</p>'
       }
       <form class="inline-form" data-form="food-new">
         <input name="name" placeholder="Food name" aria-label="Food name" autocomplete="off" required>
@@ -675,8 +853,7 @@
       <p>For people who exercise, the International Society of Sports Nutrition says <b>1.4–2.0 g/kg/day</b> is enough for most, ideally spread every 3–4 hours in servings of about 0.25 g/kg or 20–40 g.${cite('jager')}</p>
       <p>A meta-analysis of resistance-training trials found muscle gains leveled off around <b>1.6 g/kg/day</b> (95% CI 1.03–2.20). That estimate is uncertain, so the authors suggest up to ~2.2 g/kg/day for anyone trying to maximize gains.${cite('morton')}</p>
       <p>Schoenfeld &amp; Aragon suggest about <b>0.4 g/kg per meal across at least four meals</b> to reach ~1.6 g/kg/day (up to ~0.55 g/kg per meal for 2.2 g/kg/day).${cite('schoenfeld')}</p>
-      <p>Over 65, the PROT-AGE group recommends at least 1.0–1.2 g/kg/day, and 1.2 g/kg/day or more if you are active.${cite('bauer')}</p>
-      <p class="warn">Kidney disease or another medical condition? Talk to your clinician before raising protein. PROT-AGE notes that people with severe kidney disease who are not on dialysis may need to limit it.${cite('bauer')}</p>
+      <p class="warn">Kidney disease or another medical condition? Talk to your clinician before raising protein. One expert group notes that people with severe kidney disease who are not on dialysis may need to limit it.${cite('bauer')}</p>
       ${refList(['iom', 'jager', 'morton', 'schoenfeld', 'bauer'])}
     </details>`;
   }
@@ -689,7 +866,7 @@
       const label = ws.toLocaleDateString([], { month: 'numeric', day: 'numeric' });
       data.push({ label: i === 0 ? 'Now' : label, full: `Week of ${ws.getDate()} ${MON[ws.getMonth()]}`, value: weekStats(ws).eq, current: i === 0 });
     }
-    return columnChart({ data, goal: WEEKLY_GOAL, unit: 'min', cls: 'move', caption: 'Moderate-equivalent aerobic minutes per week, last 8 weeks' });
+    return columnChart({ data, goal: WEEKLY_GOAL, unit: 'min', cls: 'move', caption: 'Moderate-equivalent aerobic minutes per week, last 8 weeks', firstCol: 'Week' });
   }
 
   function renderMove() {
@@ -703,11 +880,11 @@
       for (const w of day(k).workouts) rows.push({ label: DOW[d.getDay()], k, w });
     }
     let sub = `${WEEKLY_GOAL - s.eq} min to go · vigorous minutes count double`;
-    if (s.eq >= WEEKLY_STRETCH) sub = `Upper target (${WEEKLY_STRETCH}+) smashed 🔥`;
-    else if (s.eq >= WEEKLY_GOAL) sub = `Weekly goal hit 🔥 ${streak}-week streak · stretch: ${WEEKLY_STRETCH}`;
+    if (s.eq >= WEEKLY_STRETCH) sub = `Past ${WEEKLY_STRETCH} this week 💗 Remember rest counts too.`;
+    else if (s.eq >= WEEKLY_GOAL) sub = `Weekly goal reached 💗 ${streak}-week streak`;
     return `
     <section class="hero">
-      <p class="eyebrow">This week · aerobic</p>
+      <p class="eyebrow">This week · movement</p>
       <h1 class="display">${s.eq}<span class="unit"> / ${WEEKLY_GOAL} min</span></h1>
       ${meter('move', s.eq / WEEKLY_GOAL)}
       <p class="sub">${sub}</p>
@@ -717,16 +894,17 @@
       <div class="stat"><span class="stat-label">Active days</span><span class="stat-value">${s.active}<small> / 7</small></span></div>
       <div class="stat"><span class="stat-label">Vigorous</span><span class="stat-value">${s.vig}<small> min</small></span></div>
     </section>
-    <button type="button" class="cta move" data-act="open-workout">+ Log workout</button>
+    <button type="button" class="cta" data-act="open-workout">+ Log movement</button>
     <section class="card">
       <div class="card-head"><h2>This week</h2><span class="muted">${s.sessions} ${s.sessions === 1 ? 'session' : 'sessions'}</span></div>
-      ${rows.length ? workoutRows(rows) : '<p class="muted">No workouts logged this week yet.</p>'}
+      ${rows.length ? workoutRows(rows) : '<p class="muted">Nothing logged yet this week. Any amount counts.</p>'}
     </section>
     <section class="card"><div class="card-head"><h2>Last 8 weeks</h2><span class="muted">min per week</span></div>${weeksChart()}</section>
     <details class="card evidence">
       <summary>Why these numbers?</summary>
       <p>US and WHO guidelines: adults should get <b>150–300 min/week of moderate</b> or <b>75–150 min/week of vigorous</b> aerobic activity (or an equivalent mix), plus <b>muscle-strengthening on 2 or more days</b> a week.${cite('piercy', 'bull')}</p>
-      <p>Rule of thumb: 2 minutes of moderate counts the same as 1 minute of vigorous, so JohnBF counts vigorous minutes double. Light activity and strength-only sessions don’t add aerobic minutes.${cite('hhs')}</p>
+      <p>The US guidelines also say to move more and sit less: some physical activity is better than none.${cite('piercy')}</p>
+      <p>Rule of thumb: 2 minutes of moderate counts the same as 1 minute of vigorous, so VITA counts vigorous minutes double. Light activity and strength-only sessions don’t add aerobic minutes.${cite('hhs')}</p>
       <p>Talk test: “a person doing moderate-intensity aerobic activity can talk, but not sing, during the activity. A person doing vigorous-intensity activity cannot say more than a few words without pausing for a breath.”${cite('hhs')}</p>
       ${refList(['piercy', 'hhs', 'bull'])}
     </details>`;
@@ -737,8 +915,7 @@
     const cells = [];
     for (let i = 13; i >= 0; i--) {
       const d = addDays(today, -i);
-      const k = keyOf(d);
-      const met = vitMet(k);
+      const met = vitMet(keyOf(d));
       cells.push(`<span class="hcell${met ? ' on' : ''}${i === 0 ? ' now' : ''}" role="img" aria-label="${DOW[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]}: ${met ? 'all taken' : 'not complete'}"><i>${DOW1[d.getDay()]}</i></span>`);
     }
     return `<div class="habit-grid vit">${cells.join('')}</div><p class="muted small">Filled = every supplement checked off that day.</p>`;
@@ -749,7 +926,7 @@
     const taken = suppsTakenToday();
     const streak = vitStreak();
     let sub = 'Add your supplements below.';
-    if (n) sub = taken >= n ? `All done 🔥 ${streak}-day streak` : `${n - taken} to go${streak ? ` · ${streak}-day streak` : ''}`;
+    if (n) sub = taken >= n ? `All done 💗 ${streak}-day streak` : `${n - taken} to go${streak ? ` · ${streak}-day streak` : ''}`;
     return `
     <section class="hero">
       <p class="eyebrow">Vitamins today</p>
@@ -784,7 +961,7 @@
       <summary>Tips &amp; sources</summary>
       <p><b>Vitamin D likes fat.</b> In a trial of 50 healthy older adults, a single vitamin D3 dose taken with a fat-containing meal produced a 32% higher peak blood level than the same dose with a fat-free meal.${cite('dawson')}</p>
       <p>In a small uncontrolled study (17 patients), moving vitamin D to the largest meal of the day was followed by an average ~50% rise in blood 25(OH)D over 2–3 months.${cite('mulligan')}</p>
-      <p>That’s why JohnBF’s default vitamin reminder is with breakfast. Move it to whichever meal has some fat in it.</p>
+      <p>That’s why the default vitamin reminder is with breakfast. Move it to whichever meal has some fat in it.</p>
       <p class="warn">Not medical advice. Ask a pharmacist or doctor about doses and interactions with any medicines you take.</p>
       ${refList(['dawson', 'mulligan'])}
     </details>`;
@@ -794,7 +971,7 @@
     if (!state.calHash) return 'Not added to Calendar yet.';
     const when = new Date(state.calAt).toLocaleDateString([], { month: 'short', day: 'numeric' });
     if (state.calHash !== calHash())
-      return `<b class="alert">Changed since you added them (${when}).</b> Delete the old JohnBF events, then add again.`;
+      return `<b class="alert">Changed since you added them (${when}).</b> Delete the old VITA events, then add again.`;
     return `In Calendar since ${when} ✓`;
   }
 
@@ -815,7 +992,7 @@
               const on = r.days.includes(d);
               return `<button type="button" class="day ${KIND[kind].cls}${on ? ' on' : ''}" data-act="rem-day" data-id="${r.id}" data-day="${d}" aria-pressed="${on}" aria-label="${DOW_FULL[d]}">${DOW1[d]}</button>`;
             }).join('')}</div>
-            <label class="follow"><span>Follow-up</span>
+            <label class="follow"><span>Gentle check-in</span>
               <select data-field="rem-follow" data-id="${r.id}">${[0, 15, 30, 45, 60, 90, 120]
                 .map((m) => `<option value="${m}"${r.followUp === m ? ' selected' : ''}>${m ? `${m} min later` : 'Off'}</option>`)
                 .join('')}</select>
@@ -830,21 +1007,22 @@
   function renderRemind() {
     const c = eventCount();
     return `
+    <a class="back" href="#me">‹ Me</a>
     <section class="hero">
       <p class="eyebrow">Reminders</p>
-      <h1 class="display">Alerts</h1>
-      <p class="sub">Delivered by your iPhone Calendar, so they ring even when JohnBF is closed.</p>
+      <h1 class="display">Gentle nudges</h1>
+      <p class="sub">Delivered by your iPhone Calendar, so they arrive even when VITA is closed.</p>
     </section>
     <section class="card cal-card">
       <ol class="steps">
         <li><b>Test it.</b> Tap <i>Send test alert</i>, add the event, and wait about 2 minutes for the notification.</li>
         <li><b>Add your schedule.</b> Tap <i>Add reminders to Calendar</i>, then <i>Add All</i>.</li>
-        <li><b>Tip:</b> If iPhone asks which calendar, pick one used only for JohnBF (make it first in the Calendar app). Deleting that calendar later removes every JohnBF reminder at once.</li>
+        <li><b>Tip:</b> If iPhone asks which calendar, pick one used only for VITA (make it first in the Calendar app). Deleting that calendar later removes every VITA reminder at once.</li>
       </ol>
       <a class="cta" data-cal="all" data-act="cal-mark" href="${icsHref(calPayload())}"${calTarget}>Add reminders to Calendar</a>
       <a class="btn ghost wide" data-cal="test" href="${icsHref({ test: 1 })}"${calTarget}>Send test alert</a>
       <p class="muted small" id="cal-status">${calStatus()}</p>
-      <p class="muted small">${c.main} repeating reminders${c.follow ? ` + ${c.follow} follow-ups` : ''}. Follow-ups ring even if you’ve already logged it, because Calendar can’t see the app.</p>
+      <p class="muted small">${c.main} repeating reminders${c.follow ? ` + ${c.follow} gentle check-ins` : ''}. Check-ins arrive even if you’ve already logged it, because Calendar can’t see the app.</p>
       <div class="row-links">
         <button type="button" class="link" data-act="cal-download">Download .ics file</button>
         <button type="button" class="link" data-act="cal-copy">Copy link for Safari</button>
@@ -857,10 +1035,113 @@
         <li>Check <b>Settings → Notifications → Calendar</b> and make sure notifications are allowed.</li>
         <li>Focus modes (Sleep, Work, Do Not Disturb) can silence Calendar alerts.</li>
         <li>If <i>Add reminders</i> does nothing in the Home Screen app, tap <i>Copy link for Safari</i>, paste it into Safari, and add from there.</li>
-        <li>Changed your schedule? Calendar doesn’t update by itself. Delete the old JohnBF events (or the JohnBF calendar) and add them again.</li>
-        <li><b>Why Calendar?</b> iPhone web apps can’t schedule their own notifications while closed, so Calendar does the ringing.</li>
+        <li>Changed your schedule? Calendar doesn’t update by itself. Delete the old VITA events (or the VITA calendar) and add them again.</li>
+        <li><b>Why Calendar?</b> iPhone web apps can’t schedule their own notifications while closed, so Calendar does it.</li>
       </ul>
     </details>`;
+  }
+
+  function progressBlock() {
+    const prog = state.progress.slice().sort((a, b) => a.date.localeCompare(b.date));
+    const first = prog[0];
+    const last = prog[prog.length - 1];
+    let nudge = 'Take one now as your Day 1. Same spot, same light, about once a week makes changes easier to see.';
+    if (last) {
+      const d = daysBetween(last.date, todayKey());
+      if (d === 0) nudge = 'Saved today. See you next week 💗';
+      else if (d >= 7) nudge = `It’s been ${d} days since your last one. Whenever you’re ready.`;
+      else nudge = `Last one ${d} day${d === 1 ? '' : 's'} ago.`;
+    }
+    let compare = '';
+    if (prog.length >= 2) {
+      const ua = photoURL(first.id);
+      const ub = photoURL(last.id);
+      const d = daysBetween(first.date, last.date);
+      const wk = Math.round(d / 7);
+      compare = `<div class="compare">
+          <figure>${ua ? `<img src="${ua}" alt="First progress photo, ${fmtShort(first.date)}">` : '<span class="ph"></span>'}<figcaption>Day 1 · ${fmtShort(first.date)}</figcaption></figure>
+          <figure>${ub ? `<img src="${ub}" alt="Latest progress photo, ${fmtShort(last.date)}">` : '<span class="ph"></span>'}<figcaption>Latest · ${fmtShort(last.date)}</figcaption></figure>
+        </div>
+        <p class="muted small center">${wk >= 1 ? `${wk} week${wk === 1 ? '' : 's'} apart` : `${d} day${d === 1 ? '' : 's'} apart`}</p>`;
+    }
+    return `${compare}
+      <p class="muted small">${nudge}</p>
+      <button type="button" class="btn fire wide" data-act="pick-progress">＋ Add today’s photo</button>
+      ${
+        prog.length
+          ? `<div class="pgrid">${prog
+              .slice()
+              .reverse()
+              .map((p) => {
+                const u = photoURL(p.id);
+                return `<button type="button" class="pthumb" data-act="view-photo" data-id="${p.id}" aria-label="Progress photo from ${fmtLong(p.date)}">${u ? `<img src="${u}" alt="">` : '<span class="ph"></span>'}<span>${fmtShort(p.date)}</span></button>`;
+              })
+              .join('')}</div>`
+          : ''
+      }`;
+  }
+
+  function renderMe() {
+    const name = displayName();
+    const c = state.cover;
+    const preview = photoImg(c, 'Your cover photo');
+    const calLine = !state.calHash ? 'Not set up yet. Tap to add them to Calendar.' : state.calHash !== calHash() ? 'You changed something. Tap to update Calendar.' : 'In your Calendar ✓ Tap to edit times.';
+    return `
+    <section class="hero">
+      <p class="eyebrow">Me</p>
+      <h1 class="display"><span class="fire-text">${h(name || 'You')}</span></h1>
+      <p class="sub">Your space. Photos stay on this phone and are never uploaded.</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Cover photo</h2>${c ? '<button type="button" class="link" data-act="remove-cover">Remove</button>' : ''}</div>
+      <div class="cover-preview style-${c ? h(c.style) : 'glow'}">${preview || '<span class="muted">No photo yet. It shows at the top of Today.</span>'}</div>
+      <button type="button" class="cta" data-act="pick-cover">${c ? 'Choose a different photo' : 'Choose a photo'}</button>
+      ${
+        c
+          ? `<div class="field"><span class="field-label">Look</span>
+              <div class="seg" role="group" aria-label="Photo look">${PHOTO_STYLES.map(
+                (s) => `<button type="button" class="${c.style === s.id ? 'on' : ''}" data-act="cover-style" data-style="${s.id}" aria-pressed="${c.style === s.id}">${s.label}</button>`
+              ).join('')}</div></div>
+            <label class="field"><span class="field-label">Framing</span>
+              <input type="range" min="0" max="100" step="1" value="${Number(c.pos) || 0}" data-field="cover-pos" aria-label="Move the photo framing up or down"></label>`
+          : ''
+      }
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Progress photos</h2><span class="muted">${state.progress.length}</span></div>
+      ${progressBlock()}
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>About you</h2></div>
+      <label class="field"><span class="field-label">Name</span><input data-field="name" value="${h(state.profile.name)}" placeholder="Your name" autocomplete="off" maxlength="30"></label>
+      <label class="field"><span class="field-label">Your own words</span><input data-field="mantra" value="${h(state.mantra)}" placeholder="e.g. Strong, calm, consistent." autocomplete="off" maxlength="80"></label>
+      <p class="muted small">Shown on your Today screen. Tap the line there to see others.</p>
+    </section>
+
+    <a class="card callout" href="#remind"><b>Reminders →</b><span>${calLine}</span></a>
+
+    <section class="card">
+      <div class="card-head"><h2>Backup</h2></div>
+      <p class="muted small">Your logs live only on this phone. Export a backup now and then (Save to Files works well). Photos aren’t included, so keep the originals in your Photos app.</p>
+      <div class="btn-row">
+        <button type="button" class="btn" data-act="export">Export backup</button>
+        <button type="button" class="btn" data-act="import">Import backup</button>
+      </div>
+    </section>
+
+    <details class="card evidence">
+      <summary>Sources</summary>
+      <p>Every number in VITA comes from one of these. Each was checked against PubMed, the publisher or HHS.</p>
+      ${refList(REF_ORDER)}
+    </details>
+
+    <section class="card">
+      <p class="muted small">VITA is a habit tracker, not medical advice. Talk to a clinician about what’s right for you, especially if you have a medical condition or take medicines.</p>
+      <button type="button" class="btn danger wide" data-act="reset">Erase all data</button>
+    </section>`;
   }
 
   // ── Sheets ───────────────────────────────────────────────────────────────────
@@ -881,7 +1162,7 @@
   function workoutSheet() {
     const first = WORKOUT_TYPES[0];
     return `<form class="sheet-body" data-form="workout">
-      <div class="sheet-head"><h2 id="sheet-title">Log workout</h2><button type="button" class="icon-btn" data-act="close-sheet" aria-label="Close">×</button></div>
+      <div class="sheet-head"><h2 id="sheet-title">Log movement</h2><button type="button" class="icon-btn" data-act="close-sheet" aria-label="Close">×</button></div>
       <fieldset><legend>Type</legend>
         <div class="chips">${WORKOUT_TYPES.map(
           (t) => `<label class="chip-radio"><input type="radio" name="type" value="${t.id}"${t.id === first.id ? ' checked' : ''}><span>${t.label}</span></label>`
@@ -901,38 +1182,61 @@
       </fieldset>
       <label class="toggle"><input type="checkbox" name="strength"${first.strength ? ' checked' : ''}><span class="switch" aria-hidden="true"></span><span>Muscle-strengthening (counts toward ${STRENGTH_GOAL} days/week)</span></label>
       <label class="field"><span class="field-label">Date</span><input type="date" name="date" value="${todayKey()}" max="${todayKey()}"></label>
-      <button class="cta move">Save workout</button>
+      <button class="cta">Save</button>
     </form>`;
   }
 
-  function settingsSheet() {
+  function photoSheet(id) {
+    const p = state.progress.find((x) => x.id === id);
+    if (!p) return '';
+    const u = photoURL(id);
     return `<div class="sheet-body">
-      <div class="sheet-head"><h2 id="sheet-title">Settings</h2><button type="button" class="icon-btn" data-act="close-sheet" aria-label="Close">×</button></div>
-      <h3>Backup</h3>
-      <p class="muted small">Everything lives only on this phone; there's no account and no server. Export a backup now and then (Save to Files works well).</p>
-      <div class="btn-row">
-        <button type="button" class="btn" data-act="export">Export backup</button>
-        <button type="button" class="btn" data-act="import">Import backup</button>
-      </div>
-      <h3>Sources</h3>
-      <p class="muted small">Every number in JohnBF comes from one of these. Each was checked against PubMed, the publisher or HHS.</p>
-      ${refList(REF_ORDER)}
-      <h3>About</h3>
-      <p class="muted small">JohnBF is a habit tracker, not medical advice. Talk to a clinician about what’s right for you, especially if you have kidney disease or take medicines.</p>
-      <button type="button" class="btn danger wide" data-act="reset">Erase all data</button>
+      <div class="sheet-head"><h2 id="sheet-title">${fmtLong(p.date)}</h2><button type="button" class="icon-btn" data-act="close-sheet" aria-label="Close">×</button></div>
+      ${u ? `<img class="viewer" src="${u}" alt="Progress photo from ${fmtLong(p.date)}">` : '<p class="muted">This photo isn’t on this phone.</p>'}
+      <button type="button" class="btn danger wide" data-act="del-photo" data-id="${id}">Delete this photo</button>
     </div>`;
   }
 
-  // ── Feedback ─────────────────────────────────────────────────────────────────
+  // ── Feedback: toast + goal flash ─────────────────────────────────────────────
   const toastEl = document.getElementById('toast');
   let toastTimer = null;
-  function toast(msg, hot) {
+  function toast(msg) {
     toastEl.textContent = msg;
-    toastEl.className = 'show' + (hot ? ' hot' : '');
+    toastEl.className = 'show';
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => (toastEl.className = ''), hot ? 3200 : 2200);
+    toastTimer = setTimeout(() => (toastEl.className = ''), 2200);
   }
-  const celebrate = (msg) => toast(msg, true);
+
+  const flashEl = document.getElementById('flash');
+  let flashTimer = null;
+  function flash(cls, title, line) {
+    const c = state.cover;
+    const img = photoImg(c, '');
+    flashEl.className = `${cls} style-${c ? h(c.style) : 'glow'}`;
+    flashEl.innerHTML = `<div class="flash-card">
+      <div class="flash-photo">${img || '<span class="flash-heart" aria-hidden="true">💗</span>'}</div>
+      <h2>${h(title)}</h2>
+      <p>${h(line)}</p>
+      <button type="button" class="btn ghost" data-act="close-flash">Close</button>
+    </div>`;
+    flashEl.hidden = false;
+    requestAnimationFrame(() => requestAnimationFrame(() => flashEl.classList.add('show')));
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(closeFlash, 4500);
+  }
+  function closeFlash() {
+    clearTimeout(flashTimer);
+    flashEl.classList.remove('show');
+    setTimeout(() => {
+      if (!flashEl.classList.contains('show')) {
+        flashEl.hidden = true;
+        flashEl.innerHTML = '';
+      }
+    }, 300);
+  }
+  flashEl.addEventListener('click', (e) => {
+    if (e.target === flashEl) closeFlash();
+  });
 
   // ── Actions ──────────────────────────────────────────────────────────────────
   function addProtein(g, name) {
@@ -944,8 +1248,12 @@
     dayW(k).protein.push({ id: uid(), g, name: String(name || '').trim().slice(0, 40), t: Date.now() });
     commit();
     const after = before + g;
-    if (t && before < t && after >= t) celebrate(`Protein goal hit! 🔥 ${proteinStreak()}-day streak`);
+    if (t && before < t && after >= t) flash('protein', 'Protein goal reached', `Proud of you${nameComma()}. ${proteinStreak()}-day streak 💗`);
     else toast(`+${fmtG(g)} g protein${t && after < t ? ` · ${fmtG(t - after)} g to go` : ''}`);
+  }
+
+  function vitaminsDone() {
+    flash('vit', 'Vitamins done', `Taking care of yourself${nameComma()}. ${vitStreak()}-day streak 💗`);
   }
 
   function toggleSupp(id) {
@@ -956,7 +1264,7 @@
     d.suppGoal = state.supplements.length;
     const nowTaken = !!d.supps[id];
     commit();
-    if (nowTaken && vitMet(k)) celebrate(`All vitamins taken! 🔥 ${vitStreak()}-day streak`);
+    if (nowTaken && vitMet(k)) vitaminsDone();
   }
 
   const findRem = (id) => state.reminders.find((r) => r.id === id);
@@ -979,12 +1287,11 @@
     },
     supp: (el) => toggleSupp(el.dataset.id),
     'all-supps': () => {
-      const k = todayKey();
-      const d = dayW(k);
+      const d = dayW(todayKey());
       for (const s of state.supplements) if (!d.supps[s.id]) d.supps[s.id] = Date.now();
       d.suppGoal = state.supplements.length;
       commit();
-      celebrate(`All vitamins taken! 🔥 ${vitStreak()}-day streak`);
+      vitaminsDone();
     },
     'del-supp': (el) => {
       const s = findSupp(el.dataset.id);
@@ -994,6 +1301,7 @@
     },
     'open-workout': () => openSheet(workoutSheet()),
     'close-sheet': closeSheet,
+    'close-flash': closeFlash,
     wmin: (el) => {
       el.form.elements.min.value = el.dataset.min;
     },
@@ -1056,14 +1364,40 @@
       view.querySelectorAll('.col.show').forEach((c) => c.classList.remove('show'));
       if (!wasOn) el.classList.add('show');
     },
-    'open-settings': () => openSheet(settingsSheet()),
+    'shuffle-mantra': (el) => {
+      mantraShift++;
+      el.firstChild.textContent = mantra();
+    },
+    'pick-cover': () => pickPhoto('cover'),
+    'pick-progress': () => pickPhoto('progress'),
+    'remove-cover': () => {
+      if (!state.cover || !confirm('Remove your cover photo?')) return;
+      forgetPhoto(state.cover.id);
+      state.cover = null;
+      commit();
+    },
+    'cover-style': (el) => {
+      if (!state.cover) return;
+      state.cover.style = el.dataset.style;
+      commit();
+    },
+    'view-photo': (el) => openSheet(photoSheet(el.dataset.id)),
+    'del-photo': (el) => {
+      if (!confirm('Delete this progress photo?')) return;
+      forgetPhoto(el.dataset.id);
+      state.progress = state.progress.filter((p) => p.id !== el.dataset.id);
+      closeSheet();
+      commit();
+    },
     export: exportBackup,
     import: () => document.getElementById('import-file').click(),
     reset: () => {
-      if (!confirm('Erase all JohnBF data on this phone? This cannot be undone.')) return;
+      if (!confirm('Erase all VITA data and photos on this phone? This can’t be undone.')) return;
+      PhotoDB.clear().catch(() => {});
+      photoUrls.forEach((u) => URL.revokeObjectURL(u));
+      photoUrls.clear();
       state = defaults();
       commit();
-      closeSheet();
       toast('All data erased');
     },
   };
@@ -1077,6 +1411,20 @@
     custom: (el) => {
       state.profile.custom = cleanNum(el.value);
       commit();
+    },
+    name: (el) => {
+      state.profile.name = el.value.trim().slice(0, 30);
+      save();
+      refreshCalLinks();
+    },
+    mantra: (el) => {
+      state.mantra = el.value.trim().slice(0, 80);
+      mantraShift = 0;
+      save();
+    },
+    'cover-pos': (el) => {
+      if (state.cover) state.cover.pos = Number(el.value) || 0;
+      save();
     },
     'rem-time': (el) => {
       const r = findRem(el.dataset.id);
@@ -1147,14 +1495,20 @@
       closeSheet();
       commit();
       const after = weekStats(ws).eq;
-      if (before < WEEKLY_GOAL && after >= WEEKLY_GOAL) celebrate(`Weekly ${WEEKLY_GOAL} minutes hit! 🔥`);
-      else toast(`Logged ${min} min ${typeLabel(String(fd.get('type'))).toLowerCase()}`);
+      if (before < WEEKLY_GOAL && after >= WEEKLY_GOAL) flash('move', `${WEEKLY_GOAL} minutes this week`, `That’s real consistency${nameComma()} 💗`);
+      else toast(`Logged ${min} min ${typeLabel(String(fd.get('type'))).toLowerCase()}. Nice work.`);
     },
   };
 
   document.addEventListener('click', (e) => {
     const el = e.target.closest('[data-act]');
     if (el && ACTIONS[el.dataset.act]) ACTIONS[el.dataset.act](el, e);
+  });
+  document.addEventListener('input', (e) => {
+    const el = e.target;
+    if (el.dataset && el.dataset.field === 'cover-pos') {
+      view.querySelectorAll('.cover-preview .photo').forEach((img) => (img.style.objectPosition = `50% ${el.value}%`));
+    }
   });
   document.addEventListener('change', (e) => {
     const el = e.target;
@@ -1178,12 +1532,12 @@
 
   // ── Backup ───────────────────────────────────────────────────────────────────
   async function exportBackup() {
-    const name = `johnbf-backup-${todayKey()}.json`;
+    const name = `vita-backup-${todayKey()}.json`;
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
     try {
       const file = new File([blob], name, { type: 'application/json' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: 'JohnBF backup' });
+        await navigator.share({ files: [file], title: 'VITA backup' });
         return;
       }
     } catch (e) {
@@ -1198,20 +1552,20 @@
     if (!file) return;
     try {
       const data = JSON.parse(await file.text());
-      if (!data || data.v !== 1 || typeof data.days !== 'object') throw new Error('Not a JohnBF backup');
-      if (!confirm('Replace all JohnBF data on this phone with this backup?')) return;
+      if (!data || data.v !== 1 || typeof data.days !== 'object') throw new Error('Not a VITA backup');
+      if (!confirm('Replace all VITA data on this phone with this backup?')) return;
       state = normalize(data);
       commit();
-      closeSheet();
       toast('Backup restored');
     } catch (err) {
-      toast('That file is not a JohnBF backup');
+      toast('That file isn’t a VITA backup');
     }
   });
 
   // ── Router ───────────────────────────────────────────────────────────────────
   const view = document.getElementById('view');
-  const ROUTES = { today: renderToday, protein: renderProtein, move: renderMove, vitamins: renderVitamins, remind: renderRemind };
+  const ROUTES = { today: renderToday, protein: renderProtein, move: renderMove, vitamins: renderVitamins, me: renderMe, remind: renderRemind };
+  const TAB_FOR = { remind: 'me' };
   const currentRoute = () => {
     const r = location.hash.replace('#', '').split('/')[0];
     return ROUTES[r] ? r : 'today';
@@ -1219,11 +1573,24 @@
   function render() {
     const r = currentRoute();
     view.innerHTML = ROUTES[r]();
+    const tab = TAB_FOR[r] || r;
     document.querySelectorAll('.tabbar a').forEach((a) => {
-      const on = a.dataset.tab === r;
+      const on = a.dataset.tab === tab;
       a.classList.toggle('active', on);
       if (on) a.setAttribute('aria-current', 'page');
       else a.removeAttribute('aria-current');
+    });
+  }
+  // Re-render after photos load, unless someone is typing (keeps the keyboard up).
+  let softPending = false;
+  function softRender() {
+    if (softPending) return;
+    softPending = true;
+    requestAnimationFrame(() => {
+      softPending = false;
+      const a = document.activeElement;
+      if (a && view.contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) return;
+      render();
     });
   }
   window.addEventListener('hashchange', () => {

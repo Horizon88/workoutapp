@@ -1,5 +1,5 @@
 /*
- * JohnBF: iCalendar (.ics) builder.
+ * VITA: iCalendar (.ics) builder.
  * Shared by app.js (page) and sw.js (service worker), so it must not touch the DOM.
  *
  * Design notes
@@ -9,17 +9,18 @@
  *   widely supported alarm form. The optional follow-up is a separate small event
  *   with its own at-start alert, rather than a post-start alarm, because
  *   positive alarm offsets aren't reliably documented for iOS Calendar.
+ * - Voice: calm and kind.
  */
 (function (root) {
   'use strict';
 
   const DAY = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']; // index = JS getDay()
   const KINDS = {
-    protein: { emoji: '🥩', name: 'Protein' },
-    workout: { emoji: '🏋️', name: 'Workout' },
+    protein: { emoji: '🍳', name: 'Protein' },
+    workout: { emoji: '🏃‍♀️', name: 'Movement' },
     vitamins: { emoji: '💊', name: 'Vitamins' },
   };
-  const OPEN_APP = 'Open JohnBF from your Home Screen to log it.';
+  const OPEN_APP = 'Log it in VITA whenever you’re ready.';
 
   const encoder = new TextEncoder();
   const pad = (n) => String(n).padStart(2, '0');
@@ -100,10 +101,10 @@
     return [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
-      'PRODID:-//JohnBF//Habit Reminders 1.0//EN',
+      'PRODID:-//VITA//Habit Reminders 2.0//EN',
       'CALSCALE:GREGORIAN',
       'METHOD:PUBLISH',
-      'X-WR-CALNAME:JohnBF',
+      'X-WR-CALNAME:VITA',
     ];
   }
 
@@ -112,22 +113,30 @@
   function copyFor(r, cfg) {
     const k = KINDS[r.k];
     const label = r.l ? ` · ${r.l}` : '';
+    const name = cfg.n ? `, ${cfg.n}` : '';
     if (r.k === 'protein') {
       const grams = cfg.pm ? ` (~${cfg.pm} g)` : '';
       const body = cfg.pm
-        ? `Aim for about ${cfg.pm} g of protein now${cfg.pt ? ` to stay on pace for ${cfg.pt} g today` : ''}.`
-        : 'Time to get some protein in.';
+        ? `A little protein would feel good right now${name}: about ${cfg.pm} g${cfg.pt ? `, toward ${cfg.pt} g today` : ''}.`
+        : `A little protein would feel good right now${name}.`;
       return { summary: `${k.emoji} Protein${label}${grams}`, body };
     }
     if (r.k === 'vitamins') {
       const list = (cfg.s || []).filter(Boolean).join('; ');
-      return { summary: `${k.emoji} Vitamins${label}`, body: list ? `Take: ${list}.` : 'Time to take your vitamins.' };
+      return {
+        summary: `${k.emoji} Vitamins${label}`,
+        body: `${list ? `Time for: ${list}.` : 'Time for your vitamins.'} Taking care of you, one small step at a time.`,
+      };
     }
-    return { summary: `${k.emoji} Workout${label}`, body: 'Time to train. Log your minutes when you are done.' };
+    return {
+      summary: `${k.emoji} Movement${label}`,
+      body: `Whenever you’re ready${name}. Some movement is better than none, so even a short session counts.`,
+    };
   }
 
   /**
    * cfg = {
+   *   n:  name shown in reminders (optional),
    *   r:  [{ i:id, k:'protein'|'workout'|'vitamins', l:label, t:'HH:MM', d:[0-6], f:followUpMinutes }],
    *   pm: grams per protein reminder (or null), pt: daily protein target (or null),
    *   s:  ['Vitamin D3 (2000 IU) with food', ...]
@@ -144,7 +153,7 @@
       const c = copyFor(r, cfg);
       lines.push(
         ...vevent({
-          uid: `${r.i}@johnbf`,
+          uid: `${r.i}@vita`,
           stamp: now,
           start,
           minutes: 15,
@@ -161,14 +170,14 @@
         const days = r.d.map((d) => (((d + shift) % 7) + 7) % 7);
         lines.push(
           ...vevent({
-            uid: `${r.i}-followup@johnbf`,
+            uid: `${r.i}-followup@vita`,
             stamp: now,
             start: fu,
             minutes: 5,
             rule: rrule(days),
-            summary: `🔁 ${kind.name} check-in${r.l ? ` · ${r.l}` : ''}`,
+            summary: `🌸 Gentle check-in · ${r.l || kind.name}`,
             description:
-              "Already done? Ignore this one. Calendar can't see what you've logged in JohnBF.\n\n" + OPEN_APP,
+              'Already done? Lovely, ignore this one. If not, there’s still time.\n\n(Calendar can’t see what you’ve logged in VITA.)',
           })
         );
       }
@@ -186,14 +195,13 @@
     const lines = header();
     lines.push(
       ...vevent({
-        uid: `test-${now.getTime()}@johnbf`,
+        uid: `test-${now.getTime()}@vita`,
         stamp: now,
         start,
         minutes: 5,
         rule: null,
-        summary: '✅ JohnBF test: alerts work!',
-        description:
-          'If this popped up as a notification, your JohnBF reminders will too. You can delete this event.',
+        summary: '✅ VITA test: alerts work',
+        description: 'If this popped up as a notification, your VITA reminders will too. You can delete this event.',
       })
     );
     lines.push('END:VCALENDAR');
@@ -222,5 +230,5 @@
     return payload && payload.test ? buildTest(now) : buildCalendar(payload || {}, now);
   }
 
-  root.JohnBFICS = { build, buildCalendar, buildTest, encode, decode, KINDS, DAY };
+  root.VitaICS = { build, buildCalendar, buildTest, encode, decode, KINDS, DAY };
 })(typeof self !== 'undefined' ? self : this);
